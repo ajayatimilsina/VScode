@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>間違いボール探し - FormBallGame</title>
+    <style>
+        /* 全体のレイアウト設定 (1200x800に合わせて構成) */
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            font-family: "MS UI Gothic", sans-serif;
+        }
+
+        /* SplitContainer1 Panel1 に相当する上部エリア (高さ70) */
+        #panel1 {
+            width: 1200px;
+            height: 70px;
+            background-color: #ffffff;
+            border-bottom: 2px solid #ccc;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-sizing: border-box;
+            gap: 15px;
+        }
+
+        /* TextBox1 (TextHunt) のスタイル */
+        .text-box {
+            width: 50px;
+            height: 30px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        /* SelectPictureBox (275x50) のスタイル */
+        #select-picture-box {
+            width: 275px;
+            height: 50px;
+            background-color: white;
+            border: 1px solid #999;
+        }
+
+        /* Panel2 / MainpictureBox に相当するメインエリア (1200x800) */
+        #main-picture-box {
+            width: 1200px;
+            height: 800px;
+            background-color: white;
+            position: relative;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+
+        button {
+            padding: 5px 15px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .label { font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<!-- 上部コントロールエリア -->
+<div id="panel1">
+    <input type="text" id="text-hunt" class="text-box" value="獲" readonly>
+    <span class="label">を探せ</span>
+    
+    <canvas id="select-picture-box"></canvas>
+
+    <span class="label">記録:</span>
+    <input type="text" id="score-box" class="text-box" value="0" readonly style="width: 80px;">
+
+    <span class="label">残り:</span>
+    <input type="text" id="text-timer-s" class="text-box" value="30" readonly style="width: 50px;">
+    <span class="label">秒</span>
+
+    <button id="restart-button">再スタート</button>
+</div>
+
+<!-- メインゲームエリア -->
+<canvas id="main-picture-box" width="1200" height="800"></canvas>
+
+<div style="width: 1200px; padding: 10px; font-size: 12px; color: #666;">
+    下のエリアをクリックするとボールの位置が変わります。漢字と同じ色の円を探してください。
+</div>
+
+<script>
+    const mainCanvas = document.getElementById('main-picture-box');
+    const mCtx = mainCanvas.getContext('2d');
+    const selectCanvas = document.getElementById('select-picture-box');
+    const sCtx = selectCanvas.getContext('2d');
+
+    // 設定値
+    const correctText = "獲";
+    const mistakeText = "僕";
+    const radius = 40;
+    const colors = ["#ADD8E6", "#FFB6C1", "#D3D3D3", "#F08080", "#90EE90"]; // LightBlue, LightPink, LightGray, LightCoral, LightGreen
+    
+    let balls = [];
+    let score = 0;
+    let timer = 30;
+    let gameActive = true;
+
+    class Ball {
+        constructor(text, color, isCorrect) {
+            this.text = text;
+            this.color = color;
+            this.isCorrect = isCorrect;
+            this.radius = radius;
+            
+            // 初期位置をランダムに (MainpictureBoxの範囲内)
+            this.x = Math.random() * (1200 - radius * 2);
+            this.y = Math.random() * (800 - radius * 2);
+            
+            // 移動方向と速度 (Pitch)
+            this.pitch = 6;
+            this.dx = (Math.random() > 0.5 ? 1 : -1) * this.pitch;
+            this.dy = (Math.random() > 0.5 ? 1 : -1) * this.pitch;
+        }
+
+        draw() {
+            mCtx.beginPath();
+            mCtx.arc(this.x + this.radius, this.y + this.radius, this.radius, 0, Math.PI * 2);
+            mCtx.fillStyle = this.color;
+            mCtx.fill();
+            mCtx.strokeStyle = "#333";
+            mCtx.stroke();
+            mCtx.closePath();
+
+            mCtx.fillStyle = "black";
+            mCtx.font = "bold 30px 'MS UI Gothic'";
+            mCtx.textAlign = "center";
+            mCtx.textBaseline = "middle";
+            mCtx.fillText(this.text, this.x + this.radius, this.y + this.radius);
+        }
+
+        move() {
+            this.x += this.dx;
+            this.y += this.dy;
+
+            // 壁跳ね返り判定
+            if (this.x <= 0 || this.x >= 1200 - this.radius * 2) this.dx *= -1;
+            if (this.y <= 0 || this.y >= 800 - this.radius * 2) this.dy *= -1;
+        }
+    }
+
+    // 見本エリア (SelectPictureBox) の描画
+    function drawSelectTarget() {
+        sCtx.clearRect(0, 0, selectCanvas.width, selectCanvas.height);
+        sCtx.beginPath();
+        sCtx.arc(30, 25, 20, 0, Math.PI * 2);
+        sCtx.fillStyle = colors[0]; // 見本はLightBlue
+        sCtx.fill();
+        sCtx.stroke();
+        
+        sCtx.fillStyle = "black";
+        sCtx.font = "bold 18px sans-serif";
+        sCtx.textAlign = "left";
+        sCtx.fillText(correctText + " を探せ！", 60, 32);
+    }
+
+    // ゲーム初期化
+    function initGame() {
+        balls = [];
+        const winIndex = Math.floor(Math.random() * 5);
+        
+        for (let i = 0; i < 5; i++) {
+            const isCorrect = (i === winIndex);
+            const txt = isCorrect ? correctText : mistakeText;
+            balls.push(new Ball(txt, colors[i], isCorrect));
+        }
+    }
+
+    // ゲームループ
+    function update() {
+        if (!gameActive) return;
+
+        mCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+        
+        balls.forEach(ball => {
+            ball.move();
+            ball.draw();
+        });
+
+        requestAnimationFrame(update);
+    }
+
+    // クリック判定
+    mainCanvas.addEventListener('click', (e) => {
+        const rect = mainCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        let hit = false;
+        balls.forEach(ball => {
+            const centerX = ball.x + ball.radius;
+            const centerY = ball.y + ball.radius;
+            const dist = Math.sqrt((mx - centerX) ** 2 + (my - centerY) ** 2);
+            
+            if (dist < ball.radius && ball.isCorrect) {
+                score += 10;
+                document.getElementById('score-box').value = score;
+                hit = true;
+            }
+        });
+
+        // クリックされたら配置を変える (VBの仕様通り)
+        initGame();
+    });
+
+    // 再スタートボタン
+    document.getElementById('restart-button').addEventListener('click', () => {
+        score = 0;
+        timer = 30;
+        gameActive = true;
+        document.getElementById('score-box').value = score;
+        document.getElementById('text-timer-s').value = timer;
+        initGame();
+    });
+
+    // タイマー処理
+    setInterval(() => {
+        if (timer > 0 && gameActive) {
+            timer--;
+            document.getElementById('text-timer-s').value = timer;
+            if (timer === 0) {
+                gameActive = false;
+                alert("タイムアップ！ 最終スコア: " + score);
+            }
+        }
+    }, 1000);
+
+    // 開始
+    drawSelectTarget();
+    initGame();
+    update();
+</script>
+
+</body>
+</html>
